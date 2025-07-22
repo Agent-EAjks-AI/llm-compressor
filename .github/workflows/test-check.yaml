@@ -60,6 +60,10 @@ jobs:
             coverage.json
           include-hidden-files: true
           retention-days: 5
+      - name: "Report coverage"
+        if: (success() || failure()) && inputs.code_coverage
+        run: |
+          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   pytorch-tests:
     runs-on: ubuntu-22.04
@@ -106,7 +110,10 @@ jobs:
             coverage.json
           include-hidden-files: true
           retention-days: 5
-
+      - name: "Report coverage"
+        if: (success() || failure()) && inputs.code_coverage
+        run: |
+          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   compat-pytorch-1_9-pytorch-tests:
     runs-on: ubuntu-22.04
@@ -153,6 +160,10 @@ jobs:
             coverage.json
           include-hidden-files: true
           retention-days: 5
+      - name: "Report coverage"
+        if: (success() || failure()) && inputs.code_coverage
+        run: |
+          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   combine-coverage:
     runs-on: ubuntu-22.04
