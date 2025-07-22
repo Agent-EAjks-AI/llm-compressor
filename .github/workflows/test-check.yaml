@@ -63,7 +63,7 @@ jobs:
       - name: "Report coverage"
         if: (success() || failure()) && inputs.code_coverage
         run: |
-          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
+          coverage report --data-file="$COVERAGE_FILE" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   pytorch-tests:
     runs-on: ubuntu-22.04
@@ -113,7 +113,7 @@ jobs:
       - name: "Report coverage"
         if: (success() || failure()) && inputs.code_coverage
         run: |
-          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
+          coverage report --data-file="$COVERAGE_FILE" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   compat-pytorch-1_9-pytorch-tests:
     runs-on: ubuntu-22.04
@@ -163,12 +163,12 @@ jobs:
       - name: "Report coverage"
         if: (success() || failure()) && inputs.code_coverage
         run: |
-          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
+          coverage report --data-file="$COVERAGE_FILE" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
 
   combine-coverage:
     runs-on: ubuntu-22.04
     needs: [base-tests, pytorch-tests, compat-pytorch-1_9-pytorch-tests]
-    if: inputs.code_coverage
+    if: (success() || failure()) && inputs.code_coverage
     steps:
       - name: "Checkout llm-compressor"
         uses: actions/checkout@v4
