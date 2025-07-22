@@ -18,6 +18,8 @@ jobs:
 
   base-tests:
     runs-on: ubuntu-22.04
+    env:
+      COVERAGE_FILE: ".coverage.base"
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -53,13 +55,16 @@ jobs:
         with:
           name: base-tests-coverage-results
           path: |
-            .coverage
+            .coverage*
             coverage-html
             coverage.json
+          include-hidden-files: true
           retention-days: 5
 
   pytorch-tests:
     runs-on: ubuntu-22.04
+    env:
+      COVERAGE_FILE: ".coverage.pytorch"
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -96,14 +101,17 @@ jobs:
         with:
           name: pytorch-tests-coverage-results
           path: |
-            .coverage
+            .coverage*
             coverage-html
             coverage.json
+          include-hidden-files: true
           retention-days: 5
 
 
   compat-pytorch-1_9-pytorch-tests:
     runs-on: ubuntu-22.04
+    env:
+      COVERAGE_FILE: ".coverage.compat-pytorch-1.9"
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -140,7 +148,26 @@ jobs:
         with:
           name: compat-pytorch-tests-coverage-results
           path: |
-            .coverage
+            .coverage*
             coverage-html
             coverage.json
+          include-hidden-files: true
           retention-days: 5
+
+  combine-coverage:
+    runs-on: ubuntu-22.04
+    needs: [base-tests, pytorch-tests, compat-pytorch-1_9-pytorch-tests]
+    if: inputs.code_coverage
+    steps:
+      - name: "Download base tests coverage"
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: "Install dependencies"
+        run: pip3 install coverage
+
+      - name: "Combine and report coverage"
+        run: |
+          coverage combine --data-file=".coverage"
+          coverage report --data-file=".coverage" --skip-empty --format="markdown" > "$GITHUB_STEP_SUMMARY"
