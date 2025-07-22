@@ -159,7 +159,10 @@ jobs:
     needs: [base-tests, pytorch-tests, compat-pytorch-1_9-pytorch-tests]
     if: inputs.code_coverage
     steps:
-      - name: "Download base tests coverage"
+      - name: "Checkout llm-compressor"
+        uses: actions/checkout@v4
+
+      - name: "Download coverage artifacts"
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
