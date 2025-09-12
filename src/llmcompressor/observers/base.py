@@ -162,14 +162,14 @@ class Observer(InternalModule, RegistryMixin):
                     observed = observed.index_select(-1, perm)
 
                 # TODO: experiment with vectorizing for loop for performance
-                # all reduce all dims except the last one
+                # all reduce all dims except the second to last one
                 end = 0
                 for group_index in range(num_groups):
                     start = end
                     end = start + group_size
                     scale, zero_point = self.get_qparams_along_dim(
                         observed[..., start:end],
-                        dim=tuple(range(observed.ndim - 1)),
+                        dim=-2,
                         tensor_id=group_index,
                         global_scale=global_scale,
                     )
@@ -178,17 +178,15 @@ class Observer(InternalModule, RegistryMixin):
                     self._zero_point[:, group_index] = zero_point.squeeze(1)
 
             elif self.quantization_args.strategy == QuantizationStrategy.CHANNEL:
-                # all reduce all dims except the last one
-                self._scale, self._zero_point = self.get_qparams_along_dim(
-                    observed,
-                    dim=tuple(range(observed.ndim - 1)),
-                )
+                # all reduce all dims except the second to last one
+                self._scale, self._zero_point = self.get_qparams_along_dim(observed, -2)
 
             elif self.quantization_args.strategy == QuantizationStrategy.TOKEN:
-                # all reduce all dims except the last one
+                # use dim 1, assume the obsersed.shape = [batch, token, hidden]
+                # should be batch, token
                 self._scale, self._zero_point = self.get_qparams_along_dim(
                     observed,
-                    dim=tuple(range(observed.ndim - 1)),
+                    dim={0, 1},
                 )
 
             elif self.quantization_args.strategy == QuantizationStrategy.BLOCK:
@@ -246,15 +244,23 @@ class Observer(InternalModule, RegistryMixin):
 
     def get_qparams_along_dim(
         self,
-        observed,
+        observed: torch.Tensor,
         dim: Union[int, Iterable[int]],
         tensor_id: Optional[Any] = None,
         global_scale: Optional[Tensor] = None,
     ):
+        # cast to set
         if isinstance(dim, int):
             dim = [dim]
         dim = set(dim)
 
+        # convert negative dims
+        dim = [
+            d if d >= 0 else observed.ndim + d
+            for d in dim
+        ]
+
+        # reduce all dimensions except the the one pass as argument to this function
         reduce_dims = tuple(idx for idx in range(observed.ndim) if idx not in dim)
         return self.calculate_qparams(
             observed,
