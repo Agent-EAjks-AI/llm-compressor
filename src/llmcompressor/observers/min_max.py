@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Union, Iterable
 
 import torch
 from compressed_tensors.quantization.quant_args import QuantizationArgs
@@ -128,14 +128,23 @@ class MinMaxObserver(Observer):
     def get_qparams_along_dim(
         self,
         observed: torch.Tensor,
-        dim: int,
+        dim: Union[int, Iterable[int]],
         tensor_id: Optional[Any] = None,
         global_scale: Optional[torch.Tensor] = None,
     ):
         """
         Calculate quantization parameters along the specified dimension
         """
-        reduce_dims = tuple(idx for idx in range(observed.ndim) if idx != dim)
+        # cast to set
+        if isinstance(dim, int):
+            dim = [dim]
+        dim = set(dim)
+
+        # convert negative dims
+        dim = [d if d >= 0 else observed.ndim + d for d in dim]
+
+        # reduce all dimensions except the the one passed as argument to this function
+        reduce_dims = tuple(idx for idx in range(observed.ndim) if idx not in dim)
         return self.calculate_qparams(
             observed,
             reduce_dims=reduce_dims,

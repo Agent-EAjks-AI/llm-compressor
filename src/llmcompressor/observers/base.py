@@ -256,7 +256,7 @@ class Observer(InternalModule, RegistryMixin):
         # convert negative dims
         dim = [d if d >= 0 else observed.ndim + d for d in dim]
 
-        # reduce all dimensions except the the one pass as argument to this function
+        # reduce all dimensions except the the one passed as argument to this function
         reduce_dims = tuple(idx for idx in range(observed.ndim) if idx not in dim)
         return self.calculate_qparams(
             observed,
