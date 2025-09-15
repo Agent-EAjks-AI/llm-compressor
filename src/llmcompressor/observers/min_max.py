@@ -58,6 +58,8 @@ class MinMaxObserver(Observer):
 
         # early stopping, save some computation and memory
         if self.averaging_constant == 1.0:
+            self.min_val[tensor_id] = min_val
+            self.max_val[tensor_id] = max_val
             return min_val, max_val
 
         running_min_val = self.min_val.get(tensor_id, None)
