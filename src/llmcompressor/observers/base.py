@@ -8,9 +8,8 @@ from compressed_tensors.quantization.quant_args import (
     QuantizationArgs,
     QuantizationStrategy,
 )
-from compressed_tensors.quantization.utils import is_fp4
+from compressed_tensors.quantization.utils import is_fp4, strict_divide
 from compressed_tensors.registry.registry import RegistryMixin
-from compressed_tensors.quantization.utils import strict_divide
 from loguru import logger
 from torch import FloatTensor, IntTensor, Tensor
 
@@ -255,10 +254,7 @@ class Observer(InternalModule, RegistryMixin):
         dim = set(dim)
 
         # convert negative dims
-        dim = [
-            d if d >= 0 else observed.ndim + d
-            for d in dim
-        ]
+        dim = [d if d >= 0 else observed.ndim + d for d in dim]
 
         # reduce all dimensions except the the one pass as argument to this function
         reduce_dims = tuple(idx for idx in range(observed.ndim) if idx not in dim)
