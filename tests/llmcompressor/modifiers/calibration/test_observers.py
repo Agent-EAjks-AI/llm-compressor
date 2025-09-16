@@ -157,7 +157,7 @@ def assert_alike(a, b):
         ),
     ],
 )
-def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
+def test_static_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
     # set up weight
     input_size, output_size = 6, 4
     linear = torch.nn.Linear(input_size, output_size, bias=False)
@@ -205,7 +205,7 @@ def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
                 observer="minmax",
             ),
             {"default": torch.tensor(0.0, dtype=torch.bfloat16)},
-            {"default": torch.tensor(23.0, dtype=torch.bfloat16)},
+            {"default": torch.tensor(5.0, dtype=torch.bfloat16)},
             2.5,
         ),
         (
@@ -216,28 +216,23 @@ def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
                 strategy="token",
                 observer="minmax",
             ),
-            {"default": torch.tensor([[0], [6], [12], [18]], dtype=torch.bfloat16)},
-            {"default": torch.tensor([[5], [11], [17], [23]], dtype=torch.bfloat16)},
+            {"default": torch.tensor(0.0, dtype=torch.bfloat16)},
+            {"default": torch.tensor(5.0, dtype=torch.bfloat16)},
             2.5,
         ),
-        (
-            QuantizationArgs(
-                num_bits=4,
-                type="int",
-                symmetric=True,
-                strategy="channel",
-                observer="minmax",
-            ),
-            {
-                "default": torch.tensor([[0], [6], [12], [18]], dtype=torch.bfloat16),
-                1: torch.tensor([[3], [9], [15], [21]], dtype=torch.bfloat16),
-            },
-            {
-                "default": torch.tensor([[2], [8], [14], [20]], dtype=torch.bfloat16),
-                1: torch.tensor([[5], [11], [17], [23]], dtype=torch.bfloat16),
-            },
-            2.5,
-        ),
+        # channel is not supported, but (tensor == token == channel)
+        # (
+        #     QuantizationArgs(
+        #         num_bits=4,
+        #         type="int",
+        #         symmetric=True,
+        #         strategy="channel",
+        #         observer="minmax",
+        #     ),
+        #     {"default": torch.tensor(0.0, dtype=torch.bfloat16)},
+        #     {"default": torch.tensor(5.0, dtype=torch.bfloat16)},
+        #     2.5,
+        # ),
         (
             QuantizationArgs(
                 num_bits=4,
@@ -248,12 +243,12 @@ def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
                 observer="minmax",
             ),
             {
-                "default": torch.tensor([[0], [6], [12], [18]], dtype=torch.bfloat16),
-                1: torch.tensor([[3], [9], [15], [21]], dtype=torch.bfloat16),
+                "default": torch.tensor([[0]], dtype=torch.bfloat16),
+                1: torch.tensor([[3]], dtype=torch.bfloat16),
             },
             {
-                "default": torch.tensor([[2], [8], [14], [20]], dtype=torch.bfloat16),
-                1: torch.tensor([[5], [11], [17], [23]], dtype=torch.bfloat16),
+                "default": torch.tensor([[2]], dtype=torch.bfloat16),
+                1: torch.tensor([[5]], dtype=torch.bfloat16),
             },
             2.5,
         ),
@@ -267,12 +262,12 @@ def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
                 observer="minmax",
             ),
             {
-                "default": torch.tensor([[0], [6], [12], [18]], dtype=torch.bfloat16),
-                1: torch.tensor([[3], [9], [15], [21]], dtype=torch.bfloat16),
+                "default": torch.tensor([[0]], dtype=torch.bfloat16),
+                1: torch.tensor([[3]], dtype=torch.bfloat16),
             },
             {
-                "default": torch.tensor([[2], [8], [14], [20]], dtype=torch.bfloat16),
-                1: torch.tensor([[5], [11], [17], [23]], dtype=torch.bfloat16),
+                "default": torch.tensor([[2]], dtype=torch.bfloat16),
+                1: torch.tensor([[5]], dtype=torch.bfloat16),
             },
             2.5,
         ),
@@ -301,7 +296,7 @@ def test_weight_quantization(args, exp_min_val, exp_max_val, exp_tol):
         # ),
     ],
 )
-def test_activation_quantization(args, exp_min_val, exp_max_val, exp_tol):
+def test_static_activation_quantization(args, exp_min_val, exp_max_val, exp_tol):
     # set up activation (and identity weight)
     input_size = 6
     input = torch.arange(input_size, dtype=torch.bfloat16).unsqueeze(0)
@@ -317,7 +312,11 @@ def test_activation_quantization(args, exp_min_val, exp_max_val, exp_tol):
     initialize_observer(linear, "input")
     linear.register_forward_pre_hook(calibrate_input_hook)
     
+    # calibration forward pass
+    output = linear(input)
+    assert torch.allclose(output, input, atol=exp_tol)
 
+    # check calibration
     observer = getattr(linear, "input_observer")
     breakpoint()
     assert (
@@ -329,9 +328,3 @@ def test_activation_quantization(args, exp_min_val, exp_max_val, exp_tol):
     for key in observer.min_val.keys():
         assert torch.equal(observer.min_val[key], exp_min_val[key])
         assert torch.equal(observer.max_val[key], exp_max_val[key])
-
-    # forward pass
-    linear.quantization_status = QuantizationStatus.FROZEN
-    output = linear(input)
-    true_output = input  # (@ linear.weight.T == eye)
-    assert torch.allclose(output, true_output, atol=exp_tol)

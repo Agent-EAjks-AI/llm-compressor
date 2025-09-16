@@ -200,8 +200,8 @@ def calibrate_activations(module: Module, value: torch.Tensor, base_name: str):
             calculate_gparam = True
 
     # (..., 1, hidden_dim)
-    # this reshaping is mostly for the benefit of group quantization
-    value = value.unsqueeze(-2)
+    # the second to last dim indicates that activations have one output channel
+    value = value.flatten(0, -1).unsqueeze(-2)
 
     call_observer(
         module=module,
