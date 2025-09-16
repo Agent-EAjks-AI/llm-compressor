@@ -16,7 +16,7 @@ class TestLMHead(unittest.TestCase):
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            "nm-testing/llama2.c-stories15M", device_map=self.device
+            "nm-testing/tinysmokellama-3.2", device_map=self.device
         )
 
         self.kwargs = {

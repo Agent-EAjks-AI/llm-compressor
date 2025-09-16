@@ -113,7 +113,7 @@ class TestFinetuneNoRecipeCustomDataset(unittest.TestCase):
 @pytest.mark.integration
 @parameterized_class(parse_params(CONFIGS_DIRECTORY))
 class TestOneshotCustomDatasetSmall(TestFinetuneNoRecipeCustomDataset):
-    model = None  # "nm-testing/llama2.c-stories15M"
+    model = None  # "nm-testing/tinysmokellama-3.2"
     file_extension = None  # ["json", "csv"]
     num_train_epochs = None
 
