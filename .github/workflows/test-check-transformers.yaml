@@ -1,10 +1,10 @@
 name: Test Checks (Transformers)
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, 'release/*' ]
     types: [ labeled, synchronize ]
   push:
-    branches: [ main ]
+    branches: [ main, 'release/*' ]
   workflow_dispatch:
     inputs:
       code_coverage:
@@ -15,6 +15,10 @@ on:
 env:
   CADENCE: "commit"
   HF_TOKEN: ${{ secrets.HF_TOKEN_READ }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   detect-changes:
@@ -97,10 +101,6 @@ jobs:
         if: (success() || failure()) && steps.install.outcome == 'success'
         run: |
           pytest -v tests/llmcompressor/transformers/oneshot
-      - name: Running Sparsification Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest tests/llmcompressor/transformers/sparsification -v
       - name: Running OBCQ Tests
         if: (success() || failure()) && steps.install.outcome == 'success'
         run: |

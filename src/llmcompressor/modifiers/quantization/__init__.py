@@ -1,4 +1,4 @@
-# flake8: noqa
+# ruff: noqa
 
 from .gptq import *
 from .quantization import *

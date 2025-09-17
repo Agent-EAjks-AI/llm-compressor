@@ -104,7 +104,7 @@ class SpinQuantModifier(Modifier, use_enum_values=True):
     @field_validator("randomize", "learnable", mode="before")
     def validate_not_implemented(cls, value, info: ValidationInfo):
         if value:
-            raise NotImplementedError(f"{info.field_name} is not supported right now")
+            raise NotImplementedError(f"{info.field_name} is not supported as of now")
         return value
 
     @field_validator("rotations", mode="before")

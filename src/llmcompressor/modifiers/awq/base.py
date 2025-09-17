@@ -397,7 +397,7 @@ class AWQModifier(Modifier, QuantizationMixin):
             ):
                 self._smooth_activation_means[smooth_name] = _accumulate_mean(
                     # Assume that first argument is the input
-                    args[0].cpu().detach().squeeze(),
+                    args[0].cpu().abs().detach().squeeze(),
                     self._smooth_activation_means.get(smooth_name, None),
                 )
 
@@ -476,6 +476,20 @@ class AWQModifier(Modifier, QuantizationMixin):
                         f"Skipping smooth_layer {mapping.smooth_name}, no activations "
                         "found to scale. This can occasionally occur in MoE models "
                         "when certain experts are not activated by calibration samples."
+                    )
+                    del self._smooth_activation_means[mapping.smooth_name]
+                    continue
+                if not all(
+                    [fp16_output.isfinite().all() for fp16_output in fp16_outputs]
+                ):
+                    logger.warning(
+                        f"Skipping smooth_layer {mapping.smooth_name}, NaN or inf "
+                        "outputs found during forward pass of the parent module "
+                        f"{mapping.parent_name}. The model is either generating NaN "
+                        "output with provided calibration data set, or the mappings "
+                        "are incorrectly set and modifying the model in undesired "
+                        "ways. If you encounter this consistently, raise an issue at "
+                        "https://github.com/vllm-project/llm-compressor/issues"
                     )
                     del self._smooth_activation_means[mapping.smooth_name]
                     continue
