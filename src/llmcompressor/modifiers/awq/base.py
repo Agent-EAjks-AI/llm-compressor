@@ -4,21 +4,19 @@ from typing import Literal
 
 import torch
 from compressed_tensors.quantization import (
+    QuantizationStrategy,
     disable_quantization,
     forward_quantize,
-    QuantizationStrategy,
 )
 from compressed_tensors.utils import (
     align_modules,
     get_execution_device,
     match_named_modules,
-    update_offload_parameter,
     patch_attrs,
+    update_offload_parameter,
 )
-from llmcompressor.observers.base import Observer
-
 from loguru import logger
-from pydantic import ConfigDict, PrivateAttr, model_validator
+from pydantic import ConfigDict, PrivateAttr
 from torch.nn import Module
 from tqdm import tqdm
 
@@ -35,6 +33,7 @@ from llmcompressor.modifiers.quantization.calibration import (
 )
 from llmcompressor.modifiers.quantization.quantization import QuantizationMixin
 from llmcompressor.modifiers.utils.hooks import HooksMixin
+from llmcompressor.observers.base import Observer
 from llmcompressor.pipelines.cache import IntermediatesCache
 from llmcompressor.utils.fsdp.helpers import get_fsdp_parent
 from llmcompressor.utils.helpers import calibration_forward_context
@@ -406,7 +405,6 @@ class AWQModifier(Modifier, QuantizationMixin):
                 calibration_forward_context(model),
                 HooksMixin.disable_hooks(),
             ):
-
                 # Compute output of unquantized module
                 fp16_outputs = self._run_samples(parent_module)
                 if len(fp16_outputs) == 0 or all(f.numel() == 0 for f in fp16_outputs):
