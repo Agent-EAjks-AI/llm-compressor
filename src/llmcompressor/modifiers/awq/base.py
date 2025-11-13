@@ -1,5 +1,6 @@
 import inspect
-from typing import Dict, List, Optional, Tuple, Union
+from itertools import product
+from typing import Literal
 
 import torch
 from compressed_tensors.quantization import disable_quantization, forward_quantize
@@ -10,7 +11,7 @@ from compressed_tensors.utils import (
     update_offload_parameter,
 )
 from loguru import logger
-from pydantic import ConfigDict, PrivateAttr, model_validator
+from pydantic import ConfigDict, PrivateAttr
 from torch.nn import Module
 from tqdm import tqdm
 
@@ -21,8 +22,10 @@ from llmcompressor.modifiers.awq.mappings import (
     ResolvedMapping,
     get_layer_mappings_from_architecture,
 )
-from llmcompressor.observers.helpers import _flatten_weight
-from llmcompressor.modifiers.quantization.calibration import call_observer, update_weight_zp_scale
+from llmcompressor.modifiers.quantization.calibration import (
+    call_observer,
+    update_weight_zp_scale,
+)
 from llmcompressor.modifiers.quantization.quantization import QuantizationMixin
 from llmcompressor.modifiers.utils.hooks import HooksMixin
 from llmcompressor.pipelines.cache import IntermediatesCache
@@ -112,26 +115,35 @@ class AWQModifier(Modifier, QuantizationMixin):
         device. Defaults to None, so cached args are not offloaded. Consider setting
         to torch.device("cpu") if you are encountering OOM errors
     :param duo_scaling: whether to use duo scaling, which uses both input activations
-        and weights to determine the scaling factor
+        and weights to determine the scaling factor. Defaults to True
+        If True, both activations and weights are used.
+        If False, only activations are used.
+        If "both", half the grid search is performed with duo_scaling=False and the
+        other half is performed with duo_scaling=True.
+    :param n_grid: when performing the best scales grid search for each mapping,
+        this specifies how many grid points should be used. To decrease the runtime,
+        at the possible cost of slightly worse scales, this can be decreased.
+        Defaults to 20
     """
 
     # Allow arbitrary types because AWQMapping has fields of type torch.nn.Module
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)
 
     # User-provided vars (in addition to QuantizationMixin args)
-    sequential_targets: Union[str, List[str], None] = None
-    mappings: Optional[List[AWQMapping]] = None
-    offload_device: Optional[torch.device] = None
-    duo_scaling: bool = True
+    sequential_targets: str | list[str] | None = None
+    mappings: list[AWQMapping] | None = None
+    offload_device: torch.device | None = None
+    duo_scaling: bool | Literal["both"] = True
+    n_grid: int = 20
 
     # Private vars set during initialization, cleared during finalization
-    _resolved_mappings: List[ResolvedMapping] = PrivateAttr(default_factory=list)
+    _resolved_mappings: list[ResolvedMapping] = PrivateAttr(default_factory=list)
     # Cache list of forward input args for each parent module, one dict for each batch
-    _parent_args_cache: Dict[Module, IntermediatesCache] = PrivateAttr(
+    _parent_args_cache: dict[Module, IntermediatesCache] = PrivateAttr(
         default_factory=dict
     )
     # Dict[smooth layer name, (activation means, activation counts)]
-    _smooth_activation_means: Dict[str, Tuple[torch.FloatTensor, int]] = PrivateAttr(
+    _smooth_activation_means: dict[str, tuple[torch.FloatTensor, int]] = PrivateAttr(
         default_factory=dict
     )
 
@@ -317,7 +329,7 @@ class AWQModifier(Modifier, QuantizationMixin):
 
         def cache_parent_kwargs_hook(
             module: torch.nn.Module,
-            args: Tuple[torch.Tensor, ...],
+            args: tuple[torch.Tensor, ...],
             kwargs,
         ):
             values = inspect.signature(module.forward).bind(*args, **kwargs)
@@ -326,7 +338,7 @@ class AWQModifier(Modifier, QuantizationMixin):
         def create_cache_smooth_activations_hook_fn(smooth_name):
             def cache_smooth_activations_hook(
                 _module: torch.nn.Module,
-                args: Tuple[torch.Tensor, ...],
+                args: tuple[torch.Tensor, ...],
                 _output: torch.Tensor,
             ):
                 self._smooth_activation_means[smooth_name] = _accumulate_mean(
@@ -382,9 +394,11 @@ class AWQModifier(Modifier, QuantizationMixin):
             balance_layers = mapping.balance_layers
             parent_module = mapping.parent
 
-            with align_modules(
-                [parent_module, smooth_layer, *balance_layers]
-            ), calibration_forward_context(model), HooksMixin.disable_hooks():
+            with (
+                align_modules([parent_module, smooth_layer, *balance_layers]),
+                calibration_forward_context(model),
+                HooksMixin.disable_hooks(),
+            ):
                 # [STEP 3]: Compute output of module
                 # could cache from hook, rather than recomputing here
                 fp16_outputs = self._run_samples(parent_module)
@@ -465,13 +479,13 @@ class AWQModifier(Modifier, QuantizationMixin):
             v.batch_intermediates.clear()
         self._assert_all_activations_consumed()
 
-    def _run_samples(self, module: Module) -> List[torch.Tensor]:
+    def _run_samples(self, module: Module) -> list[torch.Tensor]:
         outputs = [
             module(**batch_kwargs) for batch_kwargs in self._parent_args_cache[module]
         ]
         return [
             # If Tuple, assume that first argument is the input
-            output[0] if isinstance(output, Tuple) else output
+            output[0] if isinstance(output, tuple) else output
             for output in outputs
         ]
 
@@ -490,7 +504,6 @@ class AWQModifier(Modifier, QuantizationMixin):
         W: original weights in FP16     | layer
         s: per channel scaling factor   | s^-1 * X
         """
-        n_grid = 20
         history = []
         best_ratio = -1
         best_scales = None
@@ -509,12 +522,21 @@ class AWQModifier(Modifier, QuantizationMixin):
         if self.duo_scaling:
             x_mean, w_mean = self._compute_duo_scaling_means(mapping)
 
-        for ratio in range(n_grid):
+        match self.duo_scaling:
+            # if self.duo_scaling is "both", perform half the grid search with
+            # duo_scaling off and half with duo_scaling on
+            case "both":
+                n_grid = int(self.n_grid / 2)
+                duo_scalings = [False, True]
+            case _:
+                n_grid = self.n_grid
+                duo_scalings = [self.duo_scaling]
+        for grid_idx, use_duo_scaling in product(range(n_grid), duo_scalings):
             # create new scales
-            ratio = ratio / n_grid
+            ratio = grid_idx / n_grid
 
             # NOTE: s^-1 * x is fused here, according to paper
-            if self.duo_scaling:
+            if use_duo_scaling:
                 scales = (x_mean.pow(ratio) / (w_mean.pow(1 - ratio) + 1e-4)).clamp(
                     min=1e-4
                 )
@@ -530,7 +552,9 @@ class AWQModifier(Modifier, QuantizationMixin):
             # Q(W * s)
             for linear in linears2scale:
                 linear.weight.mul_(_scalesview)
-                call_observer(linear, "weight", linear.weight)  # assert is memoryless observer
+                call_observer(
+                    linear, "weight", linear.weight
+                )  # assert is memoryless observer
                 linear.weight = forward_quantize(linear.weight)
                 linear.weight.div_(_scalesview)
 
@@ -566,8 +590,8 @@ class AWQModifier(Modifier, QuantizationMixin):
     @torch.no_grad()
     def _compute_loss(
         self,
-        fp16_outputs: List[torch.Tensor],
-        int_w_outputs: List[torch.Tensor],
+        fp16_outputs: list[torch.Tensor],
+        int_w_outputs: list[torch.Tensor],
         device: torch.device,
     ) -> torch.Tensor:
         loss = 0.0
@@ -599,7 +623,6 @@ class AWQModifier(Modifier, QuantizationMixin):
         if len(self._smooth_activation_means) != 0:
             raise RuntimeError("Some cached activations were not used")
 
-
     def _compute_duo_scaling_means(self, mapping: ResolvedMapping):
         balance_layers = mapping.balance_layers
 
@@ -630,8 +653,8 @@ class AWQModifier(Modifier, QuantizationMixin):
 
 def _accumulate_mean(
     inp: torch.Tensor,
-    prev_mean_and_count: Optional[Tuple[torch.FloatTensor, int]],
-) -> Tuple[torch.FloatTensor, int]:
+    prev_mean_and_count: tuple[torch.FloatTensor, int] | None,
+) -> tuple[torch.FloatTensor, int]:
     sum_added = inp.sum(dim=0)
     num_added = inp.size(0)
     if prev_mean_and_count is None:
@@ -645,7 +668,7 @@ def _accumulate_mean(
     return (prev_sum + sum_added) / new_count, new_count
 
 
-def get_lowest_common_parent(names: List[str], module: Module) -> Tuple[str, Module]:
+def get_lowest_common_parent(names: list[str], module: Module) -> tuple[str, Module]:
     """
     Given a list of names, returns the lowest-scope common parent.
 

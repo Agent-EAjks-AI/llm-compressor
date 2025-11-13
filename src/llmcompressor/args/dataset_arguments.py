@@ -126,16 +126,6 @@ class DatasetArguments(CustomDatasetArguments):
         default=512,
         metadata={"help": "Number of samples to use for one-shot calibration"},
     )
-    calibrate_moe_context: bool = field(
-        default=False,
-        metadata={
-            "help": "If during calibration, the MoE context should be enabled "
-            "for the given model. This usually involves updating all MoE modules "
-            "in the model for the duration of calibration. See moe_context under "
-            "modeling/prepare.py for a list of supported MoEs and their updated "
-            "module definitions"
-        },
-    )
     shuffle_calibration_samples: bool | None = field(
         default=True,
         metadata={
@@ -181,13 +171,24 @@ class DatasetArguments(CustomDatasetArguments):
             ),
         },
     )
+    moe_calibrate_all_experts: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to calibrate all experts during MoE model calibration. "
+                "When True, all experts will see all tokens during calibration, "
+                "ensuring proper quantization statistics for all experts. "
+                "When False, only routed experts will be used. "
+                "Only relevant for MoE models. Default is True."
+            ),
+        },
+    )
     # --- pipeline arguments --- #
     pipeline: str | None = field(
         default="independent",
         metadata={
             "help": "Calibration pipeline used to calibrate model"
-            "Options: ['basic', 'datafree', 'sequential', 'layer_sequential', "
-            "independent]"
+            "Options: ['basic', 'datafree', 'sequential', independent]"
         },
     )
     tracing_ignore: list[str] = field(
@@ -203,6 +204,7 @@ class DatasetArguments(CustomDatasetArguments):
             "_prepare_fsmt_decoder_inputs",
             "_prepare_4d_causal_attention_mask_with_cache_position",
             "_update_linear_attn_mask",
+            "project_per_layer_inputs",
         ],
         metadata={
             "help": "List of functions to ignore during tracing, either "
