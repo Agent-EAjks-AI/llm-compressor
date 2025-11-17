@@ -540,80 +540,58 @@ class AWQModifier(Modifier, QuantizationMixin):
                 n_grid = self.n_grid
                 duo_scalings = [self.duo_scaling]
 
-        # Where appropriate, replace observers with memoryless_minmax
-        # for duration of grid search
-        balance_layers_to_patch = [
-            balance_layer
-            for balance_layer in mapping.balance_layers
-            if hasattr(balance_layer, "quantization_scheme")
-            and hasattr(balance_layer.quantization_scheme, "weights")
-        ]
-        with patch_attrs(
-            balance_layers_to_patch,
-            "weight_observer",
-            [
-                Observer.load_from_registry(
-                    "memoryless_minmax",
-                    base_name="weight",
-                    args=balance_layer.quantization_scheme.weights,
-                    module=balance_layer,
+        for grid_idx, use_duo_scaling in product(range(n_grid), duo_scalings):
+            # create new scales
+            ratio = grid_idx / n_grid
+
+            # NOTE: s^-1 * x is fused here, according to paper
+            if use_duo_scaling:
+                scales = (x_mean.pow(ratio) / (w_mean.pow(1 - ratio) + 1e-4)).clamp(
+                    min=1e-4
                 )
-                for balance_layer in balance_layers_to_patch
-            ],
-        ):
-            for grid_idx, use_duo_scaling in product(range(n_grid), duo_scalings):
-                # create new scales
-                ratio = grid_idx / n_grid
+            else:
+                scales = x_mean.pow(ratio).clamp(min=1e-4).view(-1)
+            scales = scales / (scales.max() * scales.min()).sqrt()
+            _scalesview = scales.view(1, -1).to(device)
 
-                # NOTE: s^-1 * x is fused here, according to paper
-                if use_duo_scaling:
-                    scales = (x_mean.pow(ratio) / (w_mean.pow(1 - ratio) + 1e-4)).clamp(
-                        min=1e-4
-                    )
-                else:
-                    scales = x_mean.pow(ratio).clamp(min=1e-4).view(-1)
-                scales = scales / (scales.max() * scales.min()).sqrt()
-                _scalesview = scales.view(1, -1).to(device)
+            # avoid scaling values that overflow
+            scales[torch.isinf(scales)] = 1
+            scales[torch.isnan(scales)] = 1
 
-                # avoid scaling values that overflow
-                scales[torch.isinf(scales)] = 1
-                scales[torch.isnan(scales)] = 1
+            # Q(W * s)
+            for balance_layer in mapping.balance_layers:
+                if not hasattr(balance_layer, "quantization_scheme") or not hasattr(
+                    balance_layer.quantization_scheme, "weights"
+                ):
+                    continue
 
-                # Q(W * s)
-                for balance_layer in balance_layers_to_patch:
-                    if not hasattr(balance_layer, "quantization_scheme") or not hasattr(
-                        balance_layer.quantization_scheme, "weights"
-                    ):
-                        continue
+                balance_layer.weight.mul_(_scalesview)
+                update_offload_parameter(
+                    balance_layer,
+                    "weight",
+                    _pseudo_quantize_tensor(
+                        w=balance_layer.weight.data,
+                        symmetric=True,
+                        bit_width=4,
+                        group_size=16,
+                    )[0]
+                    / _scalesview,
+                )
 
-                    balance_layer.weight.mul_(_scalesview)
-                    call_observer(balance_layer, "weight", balance_layer.weight)
-                    update_offload_parameter(
-                        balance_layer,
-                        "weight",
-                        forward_quantize(
-                            balance_layer,
-                            balance_layer.weight.data,
-                            "weight",
-                            balance_layer.quantization_scheme.weights,
-                        )
-                        / _scalesview,
-                    )
+            # W * X
+            int_w_outputs = self._run_samples(mapping.parent)
 
-                # W * X
-                int_w_outputs = self._run_samples(mapping.parent)
+            # compute mean squared error (L2 norm)
+            loss = self._compute_loss(fp16_outputs, int_w_outputs, device)
 
-                # compute mean squared error (L2 norm)
-                loss = self._compute_loss(fp16_outputs, int_w_outputs, device)
+            history.append(loss)
+            if loss < best_error:
+                best_error = loss
+                best_duo_scaling = use_duo_scaling
+                best_ratio = ratio
+                best_scales = scales.clone()
 
-                history.append(loss)
-                if loss < best_error:
-                    best_error = loss
-                    best_duo_scaling = use_duo_scaling
-                    best_ratio = ratio
-                    best_scales = scales.clone()
-
-                mapping.parent.load_state_dict(org_sd, strict=False)
+            mapping.parent.load_state_dict(org_sd, strict=False)
 
         if best_ratio == -1:
             logger.debug(history)
@@ -722,6 +700,49 @@ def _infer_group_size(layer: Module) -> int:
     ):
         return layer.quantization_scheme.weights.group_size
     return -1
+
+
+def _pseudo_quantize_tensor(
+    w: torch.Tensor, symmetric: bool = False, bit_width: int = 8, group_size: int = -1
+):
+    org_w_shape = w.shape
+    if group_size > 0:
+        assert org_w_shape[-1] % group_size == 0, (
+            f"org_w_shape ({org_w_shape[-1]}) must be a multiple "
+            + f"of group_size ({group_size})!"
+        )
+        w = w.reshape(-1, group_size)
+    assert w.dim() == 2
+    assert torch.isnan(w).sum() == 0
+
+    # zero point quantization
+    if not symmetric:
+        max_val = w.amax(dim=1, keepdim=True)
+        min_val = w.amin(dim=1, keepdim=True)
+        max_int = 2**bit_width - 1
+        min_int = 0
+        scales = (max_val - min_val).clamp(min=1e-5) / max_int
+        zeros = (-torch.round(min_val / scales)).clamp_(min_int, max_int)
+        w = (
+            torch.clamp(torch.round(w / scales) + zeros, min_int, max_int) - zeros
+        ) * scales
+        zeros = (zeros - 2 ** (bit_width - 1)).view(org_w_shape[0], -1)
+    else:
+        max_val = w.abs().amax(dim=1, keepdim=True)
+        max_val = max_val.clamp(min=1e-5)
+        max_int = 2 ** (bit_width - 1) - 1
+        min_int = -(2 ** (bit_width - 1))
+        scales = max_val / max_int
+        zeros = None
+        w = torch.clamp(torch.round(w / scales), min_int, max_int) * scales
+
+    assert torch.isnan(scales).sum() == 0
+    assert torch.isnan(w).sum() == 0
+
+    scales = scales.view(org_w_shape[0], -1)
+    w = w.reshape(org_w_shape)
+
+    return w, scales, zeros
 
 
 def _accumulate_mean(
