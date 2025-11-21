@@ -13,8 +13,8 @@ from llmcompressor.pipelines.registry import CalibrationPipeline
 from llmcompressor.pipelines.sequential.helpers import (
     dispatch_for_sequential,
     get_sequential_targets,
-    trace_subgraphs,
     targets_lm_head,
+    trace_subgraphs,
 )
 from llmcompressor.utils.helpers import (
     DISABLE_QAC_MODIFIERS,
@@ -83,7 +83,7 @@ class SequentialPipeline(CalibrationPipeline):
             type(mod).__name__ in DISABLE_QAC_MODIFIERS
             for mod in session.lifecycle.recipe.modifiers
         )
-        skip_lm_head = targets_lm_head(model, modifiers)
+        skip_lm_head = not targets_lm_head(model, modifiers)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(calibration_forward_context(model, skip_lm_head))
@@ -102,22 +102,22 @@ class SequentialPipeline(CalibrationPipeline):
                 # reduce memory movement by keeping modules onloaded
                 with disable_offloading():
                     # do a preliminary pass to trigger modifier hooks
-                    for batch_idx in tqdm(range(len(dataloader)), desc=calib_desc):
-                        inputs = activations.fetch(batch_idx, subgraph.input_names)
+                    for b_idx in tqdm(range(len(dataloader)), desc=calib_desc):
+                        inputs = activations.fetch(b_idx, subgraph.input_names)
                         subgraph.forward(model, **inputs)
 
                     LifecycleCallbacks.sequential_epoch_end(subgraph)
 
                     # this pass does not trigger modifier hooks
                     # and is only used for capturing outputs of newly compressed modules
-                    with HooksMixin.disable_hooks():
-                        for batch_idx in tqdm(range(len(dataloader)), desc=prop_desc):
-                            inputs = activations.fetch(batch_idx, subgraph.input_names)
-                            output = subgraph.forward(model, **inputs)
+                    if subgraph_index < num_subgraphs - 1:
+                        with HooksMixin.disable_hooks():
+                            for b_idx in tqdm(range(len(dataloader)), desc=prop_desc):
+                                inputs = activations.fetch(b_idx, subgraph.input_names)
+                                output = subgraph.forward(model, **inputs)
 
-                            if subgraph_index < num_subgraphs - 1:
-                                activations.update(batch_idx, output)
-                                activations.delete(batch_idx, subgraph.consumed_names)
+                                activations.update(b_idx, output)
+                                activations.delete(b_idx, subgraph.consumed_names)
 
             # redundant, finish any remaining compression
             LifecycleCallbacks.calibration_epoch_end()

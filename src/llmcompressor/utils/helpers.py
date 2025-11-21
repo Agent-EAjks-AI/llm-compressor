@@ -3,8 +3,6 @@ General utility helper functions.
 Common functions for interfacing with python primitives and directories/files.
 """
 
-from typing import Optional
-
 import contextlib
 import errno
 import fnmatch
@@ -1055,12 +1053,12 @@ def calibration_forward_context(model: torch.nn.Module, skip_lm_head: bool = Fal
     - Disable lm_head of model (optional)
     """
     with contextlib.ExitStack() as stack:
-        stack.push(torch.no_grad())
-        stack.push(disable_cache(model))
-        stack.push(eval_context(model))
-        stack.push(disable_hf_kernels(model))
+        stack.enter_context(torch.no_grad())
+        stack.enter_context(disable_cache(model))
+        stack.enter_context(eval_context(model))
+        stack.enter_context(disable_hf_kernels(model))
         if skip_lm_head:
-            stack.push(disable_lm_head(model))
+            stack.enter_context(disable_lm_head(model))
 
         yield
 
@@ -1072,13 +1070,14 @@ def disable_lm_head(model: torch.nn.Module):
     does not untie parameters and restores the model proper loading upon exit
     """
     from llmcompressor.transformers.compression.compressed_tensors_utils import (
-        get_embeddings
+        get_embeddings,
     )
 
     _embed_tokens, lm_head = get_embeddings(model)
     if lm_head is not None:
         if has_offloaded_params(lm_head):
-            with patch_attr(lm_head._hf_hook, "execution_device", torch.device("meta")):
+            # keep weight on meta device
+            with patch_attr(lm_head._hf_hook, "offload", False):
                 yield
         else:
             with patch_attr(lm_head, "weight", lm_head.weight.to("meta")):

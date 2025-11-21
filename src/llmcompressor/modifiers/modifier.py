@@ -1,6 +1,7 @@
 from abc import abstractmethod
-from typing import Optional
+from typing import Iterable, Optional
 
+import torch
 from pydantic import ConfigDict
 
 from llmcompressor.core.events import Event, EventType
@@ -238,3 +239,12 @@ class Modifier(ModifierInterface, HooksMixin):
         :param kwargs: Additional arguments for updating the model
         """
         pass
+
+    def get_targets(
+        self, model: torch.nn.Module
+    ) -> Iterable[tuple[str, torch.nn.Module]]:
+        """
+        Return all of the named modules which will be updated by this modifier. This
+        function can only be called after the modifier has been initialized.
+        """
+        raise NotImplementedError()

@@ -35,8 +35,10 @@ from llmcompressor.modifiers.quantization.calibration import (
 )
 from llmcompressor.modifiers.utils.hooks import HooksMixin
 from llmcompressor.transformers.compression.compressed_tensors_utils import (
-    untie_if_target_shared_embedding,
+    targets_embeddings,
+    untie_word_embeddings,
 )
+from llmcompressor.typing import NamedModules
 
 __all__ = ["QuantizationMixin"]
 
@@ -182,11 +184,8 @@ class QuantizationMixin(HooksMixin):
 
         :param model: model to prepare for calibration
         """
-
-        matched_module_generator = (
-            x[1] for x in match_named_modules(model, self.resolved_targets, self.ignore)
-        )
-        untie_if_target_shared_embedding(model, matched_module_generator)
+        if targets_embeddings(model, self.get_targets(model)):
+            untie_word_embeddings(model)
 
         for _, module in match_named_modules(model, self.resolved_targets, self.ignore):
             self._initialize_observers(module)
@@ -262,6 +261,9 @@ class QuantizationMixin(HooksMixin):
             quantization_status=QuantizationStatus.INITIALIZED,
             ignore=ignore,
         )
+
+    def get_targets(self, model: torch.nn.Module) -> NamedModules:
+        return match_named_modules(model, self.resolved_targets, self.ignore)
 
     def _initialize_observers(self, module: torch.nn.Module):
         if not hasattr(module, "quantization_scheme"):

@@ -32,7 +32,7 @@ from llmcompressor.utils.metric_logging import CompressionLogger
 __all__ = ["GPTQModifier"]
 
 
-class GPTQModifier(Modifier, QuantizationMixin):
+class GPTQModifier(QuantizationMixin, Modifier):
     """
     Implements the GPTQ algorithm from https://arxiv.org/abs/2210.17323. This modifier
     uses activations to calibrate a hessian matrix, which is then used to determine

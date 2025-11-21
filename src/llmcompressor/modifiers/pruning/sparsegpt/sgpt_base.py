@@ -12,6 +12,7 @@ from pydantic import Field, PrivateAttr, field_validator, model_validator
 from llmcompressor.core import Event, EventType, State
 from llmcompressor.modifiers.modifier import Modifier
 from llmcompressor.modifiers.utils.hooks import HooksMixin
+from llmcompressor.typing import NamedModules
 from llmcompressor.utils.pytorch.module import (
     get_layers,
     get_no_split_params,
@@ -191,6 +192,9 @@ class SparsityModifierBase(Modifier):
     def on_end(self, state: State, event: Event, **kwargs):
         self.ended_ = True
         self.remove_hooks()
+
+    def get_targets(self, model: torch.nn.Module) -> NamedModules:
+        return get_layers(self.targets, model).items()
 
     def _infer_sequential_targets(self, model: torch.nn.Module) -> str | list[str]:
         match self.sequential_targets:

@@ -7,6 +7,7 @@ from compressed_tensors.quantization import disable_quantization
 from compressed_tensors.utils import (
     align_modules,
     get_execution_device,
+    match_modules_set,
     match_named_modules,
     update_offload_parameter,
 )
@@ -26,6 +27,7 @@ from llmcompressor.modifiers.quantization.calibration import update_weight_zp_sc
 from llmcompressor.modifiers.quantization.quantization import QuantizationMixin
 from llmcompressor.modifiers.utils.hooks import HooksMixin
 from llmcompressor.pipelines.cache import IntermediatesCache
+from llmcompressor.typing import NamedModules
 from llmcompressor.utils.fsdp.helpers import get_fsdp_parent
 from llmcompressor.utils.helpers import calibration_forward_context
 from llmcompressor.utils.pytorch.module import get_layer_by_name
@@ -305,6 +307,12 @@ class AWQModifier(Modifier, QuantizationMixin):
         self._resolved_mappings.clear()
 
         return True
+
+    def get_targets(self, model: torch.nn.Module) -> NamedModules:
+        for mapping in self.mappings:
+            yield from match_modules_set(
+                model, (*mapping.balance_layers, mapping.smooth_layer)
+            )
 
     def _set_resolved_mappings(self, model: Module) -> None:
         """

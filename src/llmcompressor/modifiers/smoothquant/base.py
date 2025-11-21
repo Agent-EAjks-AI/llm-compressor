@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from compressed_tensors.utils import align_module_device
+from compressed_tensors.utils import align_module_device, match_modules_set
 from loguru import logger
 from pydantic import ConfigDict, Field
 from torch.nn import Module
@@ -13,6 +13,7 @@ from llmcompressor.modifiers.smoothquant.utils import (
     get_layer_mappings_from_architecture,
     handle_mapping_resolution_errors,
 )
+from llmcompressor.typing import NamedModules
 from llmcompressor.utils.fsdp.helpers import get_fsdp_parent
 from llmcompressor.utils.pytorch.module import (
     get_layers,
@@ -54,6 +55,7 @@ class SmoothQuantMapping:
 
     smooth_name: str
     smooth_layer: Module
+    balance_names: List[str]
     balance_layers: List[Module]
 
 
@@ -178,6 +180,13 @@ class SmoothQuantModifier(Modifier):
 
         return True
 
+    def get_targets(self, model: torch.nn.Module) -> NamedModules:
+        if not self.initialized_:
+            raise ValueError("Cannot get targets before modifier has been initialized")
+
+        for balance_targets, smooth_target in self.mappings:
+            yield from match_modules_set(model, (*balance_targets, smooth_target))
+
     def _infer_mappings_from_model(
         self,
         model: Module,
@@ -207,18 +216,20 @@ class SmoothQuantModifier(Modifier):
             to_smooth_layers = get_layers(to_smooth, model)
             for layer_name, smooth_layer in to_smooth_layers.items():
                 if not match_targets(layer_name, self.ignore)[0]:
+                    balance_names = []
                     balance_layers = []
                     for balance_suffix in to_balance:
                         # find the submodule that matches the activation layer
-                        _, balance_layer = get_matching_layer(
+                        balance_name, balance_layer = get_matching_layer(
                             balance_suffix, layer_name, model
                         )
                         if balance_layer:
+                            balance_names.append(balance_name)
                             balance_layers.append(balance_layer)
                     # each mapping can contain multiple layers to balance, but only
                     # one layer to smooth
                     mapping = SmoothQuantMapping(
-                        layer_name, smooth_layer, balance_layers
+                        layer_name, smooth_layer, balance_names, balance_layers
                     )
                     resolved_mappings.append(mapping)
         return resolved_mappings

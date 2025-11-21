@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Tuple, Union
 
+import torch
 from torch.nn import Module
 
 from llmcompressor.core import Event, EventType, State
@@ -9,6 +10,7 @@ from llmcompressor.modifiers.distillation.utils.pytorch import (
     KDModelWrapper,
     KDModuleWrapper,
 )
+from llmcompressor.typing import NamedModules
 from llmcompressor.utils.fsdp.context import summon_full_params_context
 from llmcompressor.utils.fsdp.helpers import maybe_get_wrapped, set_wrapped_model
 from llmcompressor.utils.pytorch.module import get_layers, set_layer
@@ -137,6 +139,16 @@ class OutputDistillationModifier(Modifier):
             student_wrapper.kd_enabled = False
             teacher_wrapper.kd_enabled = False
         self.wrapped_kd_model_.kd_enabled = False
+
+    def get_targets(self, model: torch.nn.Module) -> NamedModules:
+        module_targets = dict()
+        targets = self.targets if isinstance(self.targets, list) else [self.targets]
+        for target in targets:
+            # only return targets of student model, not teacher model
+            target = target[0] if isinstance(target, tuple) else target
+            module_targets.update(get_layers(target, model))
+
+        return module_targets.items()
 
     def _create_model_wrapper(
         self, student_model: Module, teacher_model: Module, state: State
