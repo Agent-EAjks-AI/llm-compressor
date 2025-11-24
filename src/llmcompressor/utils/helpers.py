@@ -18,7 +18,7 @@ import warnings
 from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Tuple, Union, TYPE_CHECKING
 from urllib.parse import urlparse
 
 import numpy
@@ -27,6 +27,9 @@ from compressed_tensors.quantization import disable_quantization, enable_quantiz
 from compressed_tensors.utils.offload import has_offloaded_params
 from loguru import logger
 from transformers import PreTrainedModel
+
+if TYPE_CHECKING:
+    from llmcompressor.modifiers.modifier import Modifier
 
 __all__ = [
     "ALL_TOKEN",
@@ -68,6 +71,8 @@ __all__ = [
     "calibration_forward_context",
     "patch_attr",
     "disable_hf_kernels",
+    "disable_lm_head",
+    "targets_lm_head",
     "DISABLE_QAC_MODIFIERS",
 ]
 
@@ -1042,7 +1047,7 @@ def disable_hf_kernels(module: torch.nn.Module):
 
 
 @contextlib.contextmanager
-def calibration_forward_context(model: torch.nn.Module, skip_lm_head: bool = False):
+def calibration_forward_context(model: torch.nn.Module):
     """
     Context in which all calibration forward passes should occur.
 
@@ -1050,15 +1055,12 @@ def calibration_forward_context(model: torch.nn.Module, skip_lm_head: bool = Fal
     - Disable the KV cache
     - Disable train mode and enable eval mode
     - Disable hf kernels which could bypass hooks
-    - Disable lm_head of model (optional)
     """
     with contextlib.ExitStack() as stack:
         stack.enter_context(torch.no_grad())
         stack.enter_context(disable_cache(model))
         stack.enter_context(eval_context(model))
         stack.enter_context(disable_hf_kernels(model))
-        if skip_lm_head:
-            stack.enter_context(disable_lm_head(model))
 
         yield
 
@@ -1091,7 +1093,19 @@ def disable_lm_head(model: torch.nn.Module):
         yield
 
 
-# TODO: deprecate
+def targets_lm_head(model: PreTrainedModel, modifiers: list["Modifier"]) -> bool:
+    """ Returns True if the given modifiers target the lm_head """
+    from llmcompressor.transformers.compression.compressed_tensors_utils import (
+        targets_embeddings
+    )
+
+    targets = sum(
+        (list(modifier.get_targets(model)) for modifier in modifiers), start=[]
+    )
+    return targets_embeddings(model, targets, check_input=True, check_output=False)
+    
+
+
 @contextlib.contextmanager
 def patch_attr(base: object, attr: str, value: Any):
     """

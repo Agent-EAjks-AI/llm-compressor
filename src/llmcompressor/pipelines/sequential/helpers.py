@@ -24,9 +24,6 @@ from transformers.configuration_utils import PretrainedConfig
 from llmcompressor.modifiers import Modifier
 from llmcompressor.modifiers.utils.hooks import HooksMixin
 from llmcompressor.pipelines.sequential.transformers_helpers import HFTracer
-from llmcompressor.transformers.compression.compressed_tensors_utils import (
-    targets_embeddings,
-)
 from llmcompressor.utils.helpers import calibration_forward_context, patch_attr
 from llmcompressor.utils.pytorch.module import get_no_split_params
 
@@ -40,7 +37,6 @@ __all__ = [
     "Subgraph",
     "get_sequential_targets",
     "dispatch_for_sequential",
-    "targets_lm_head",
 ]
 
 
@@ -497,14 +493,6 @@ def get_sequential_targets(
         return [sequential_targets]
     else:
         return sequential_targets
-
-
-def targets_lm_head(model: PreTrainedModel, modifiers: list[Modifier]) -> bool:
-    targets = sum(
-        (list(modifier.get_targets(model)) for modifier in modifiers), start=[]
-    )
-
-    return targets_embeddings(model, targets, check_input=True, check_output=False)
 
 
 def add_line_numbers(text: str) -> str:

@@ -16,7 +16,7 @@ DATASET_SPLIT = "train_sft"
 
 # Select number of samples. 512 samples is a good place to start.
 # Increasing the number of samples can improve accuracy.
-NUM_CALIBRATION_SAMPLES = 512
+NUM_CALIBRATION_SAMPLES = 12
 MAX_SEQUENCE_LENGTH = 2048
 
 # Load dataset and preprocess.
@@ -57,6 +57,7 @@ recipe = GPTQModifier(targets="Linear", scheme="W4A16", ignore=["lm_head"])
 oneshot(
     model=model,
     dataset=ds,
+    batch_size=12,
     recipe=recipe,
     max_seq_length=MAX_SEQUENCE_LENGTH,
     num_calibration_samples=NUM_CALIBRATION_SAMPLES,

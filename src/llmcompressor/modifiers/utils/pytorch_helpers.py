@@ -7,13 +7,10 @@ detection. Supports MoE (Mixture of Experts) models and specialized
 tensor operations for compression workflows.
 """
 
-from typing import TYPE_CHECKING, Dict
+from typing import Dict
 
 import torch
 from torch.nn import Module
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = [
     "apply_pad_mask_to_batch",

@@ -55,7 +55,6 @@ class SmoothQuantMapping:
 
     smooth_name: str
     smooth_layer: Module
-    balance_names: List[str]
     balance_layers: List[Module]
 
 
@@ -216,7 +215,6 @@ class SmoothQuantModifier(Modifier):
             to_smooth_layers = get_layers(to_smooth, model)
             for layer_name, smooth_layer in to_smooth_layers.items():
                 if not match_targets(layer_name, self.ignore)[0]:
-                    balance_names = []
                     balance_layers = []
                     for balance_suffix in to_balance:
                         # find the submodule that matches the activation layer
@@ -224,12 +222,11 @@ class SmoothQuantModifier(Modifier):
                             balance_suffix, layer_name, model
                         )
                         if balance_layer:
-                            balance_names.append(balance_name)
                             balance_layers.append(balance_layer)
                     # each mapping can contain multiple layers to balance, but only
                     # one layer to smooth
                     mapping = SmoothQuantMapping(
-                        layer_name, smooth_layer, balance_names, balance_layers
+                        layer_name, smooth_layer, balance_layers
                     )
                     resolved_mappings.append(mapping)
         return resolved_mappings

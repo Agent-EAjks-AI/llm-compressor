@@ -13,13 +13,14 @@ from llmcompressor.pipelines.registry import CalibrationPipeline
 from llmcompressor.pipelines.sequential.helpers import (
     dispatch_for_sequential,
     get_sequential_targets,
-    targets_lm_head,
     trace_subgraphs,
 )
 from llmcompressor.utils.helpers import (
     DISABLE_QAC_MODIFIERS,
     DisableQuantization,
     calibration_forward_context,
+    targets_lm_head,
+    disable_lm_head,
 )
 
 if TYPE_CHECKING:
@@ -83,13 +84,15 @@ class SequentialPipeline(CalibrationPipeline):
             type(mod).__name__ in DISABLE_QAC_MODIFIERS
             for mod in session.lifecycle.recipe.modifiers
         )
-        skip_lm_head = not targets_lm_head(model, modifiers)
 
         with contextlib.ExitStack() as stack:
-            stack.enter_context(calibration_forward_context(model, skip_lm_head))
+            stack.enter_context(calibration_forward_context(model))
             # Optionally disable quantization
             if not dataset_args.quantization_aware_calibration or disable_qac:
                 stack.enter_context(DisableQuantization(model))
+            # Optional disable lm_head
+            if not targets_lm_head(model, modifiers):
+                stack.enter_context(disable_lm_head(model))
 
             # prepare intermediates cache
             activations = IntermediatesCache.from_dataloader(dataloader, model_device)
